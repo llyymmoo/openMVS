@@ -260,51 +260,142 @@ IIndexArr ParseViewsFile(const String& filename, const Scene& scene) {
 
 int main(int argc, LPCTSTR* argv)
 {
-	#ifdef _DEBUGINFO
-	// set _crtBreakAlloc index to stop in <dbgheap.c> at allocation
-	_CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);// | _CRTDBG_CHECK_ALWAYS_DF);
-	#endif
+	// #ifdef _DEBUGINFO
+	// // set _crtBreakAlloc index to stop in <dbgheap.c> at allocation
+	// _CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);// | _CRTDBG_CHECK_ALWAYS_DF);
+	// #endif
 
-	Application application;
-	if (!application.Initialize(argc, argv))
-		return EXIT_FAILURE;
+	// Application application;
+	// if (!application.Initialize(argc, argv))
+	// 	return EXIT_FAILURE;
+
+	// Scene scene(OPT::nMaxThreads);
+	// // load and texture the mesh
+	// const Scene::SCENE_TYPE sceneType(scene.Load(MAKE_PATH_SAFE(OPT::strInputFileName)));
+	// if (sceneType == Scene::SCENE_NA)
+	// 	return EXIT_FAILURE;
+	// if (!OPT::strMeshFileName.empty() && !scene.mesh.Load(MAKE_PATH_SAFE(OPT::strMeshFileName))) {
+	// 	VERBOSE("error: cannot load mesh file");
+	// 	return EXIT_FAILURE;
+	// }
+	// if (scene.mesh.IsEmpty()) {
+	// 	VERBOSE("error: empty initial mesh");
+	// 	return EXIT_FAILURE;
+	// }
+	// const String baseFileName(MAKE_PATH_SAFE(Util::getFileFullName(OPT::strOutputFileName)));
+	// if (OPT::nOrthoMapResolution && !scene.mesh.HasTexture()) {
+	// 	// the input mesh is already textured and an orthographic projection was requested
+	// 	goto ProjectOrtho;
+	// }
+
+	// {
+	// // decimate to the desired resolution
+	// if (OPT::fDecimateMesh < 1.f) {
+	// 	ASSERT(OPT::fDecimateMesh > 0.f);
+	// 	scene.mesh.Clean(OPT::fDecimateMesh, 0.f, false, OPT::nCloseHoles, 0u, 0.f, false);
+	// 	scene.mesh.Clean(1.f, 0.f, false, 0u, 0u, 0.f, true); // extra cleaning to remove non-manifold problems created by closing holes
+	// 	#if TD_VERBOSE != TD_VERBOSE_OFF
+	// 	if (VERBOSITY_LEVEL > 3)
+	// 		scene.mesh.Save(baseFileName +_T("_decim")+OPT::strExportType);
+	// 	#endif
+	// }
+
+// parameters define
+#define FX          100
+#define FY          100
+#define CX          100
+#define CY          100
+#define HEIGHT      640
+#define WIDTH       360
+
+
+	// path define
+	String mesh_obj_file_path = "/home/lym/Data";
+	String front_image_list_path = "";
+	String back_image_list_path = "";
+	String work_folder_path = "";
+	String save_folder_path = "";
 
 	Scene scene(OPT::nMaxThreads);
-	// load and texture the mesh
-	const Scene::SCENE_TYPE sceneType(scene.Load(MAKE_PATH_SAFE(OPT::strInputFileName)));
-	if (sceneType == Scene::SCENE_NA)
-		return EXIT_FAILURE;
-	if (!OPT::strMeshFileName.empty() && !scene.mesh.Load(MAKE_PATH_SAFE(OPT::strMeshFileName))) {
-		VERBOSE("error: cannot load mesh file");
-		return EXIT_FAILURE;
-	}
-	if (scene.mesh.IsEmpty()) {
-		VERBOSE("error: empty initial mesh");
-		return EXIT_FAILURE;
-	}
-	const String baseFileName(MAKE_PATH_SAFE(Util::getFileFullName(OPT::strOutputFileName)));
-	if (OPT::nOrthoMapResolution && !scene.mesh.HasTexture()) {
-		// the input mesh is already textured and an orthographic projection was requested
-		goto ProjectOrtho;
+
+	// 1. load mesh
+	scene.mesh.Load(mesh_obj_file_path);
+
+	// 2. load platform and camera
+	//    (for insta360 camera, we have 2 platforms and cameras: one for front and one for back)
+	MVS_API::KMatrix K = MVS_API::KMatrix::eye();
+	K(0,0) = FX;
+	K(1,1) = FY;
+	K(0,2) = CX-REAL(0.5);
+	K(1,2) = CY-REAL(0.5);
+	MVS_API::RMatrix R = MVS_API::RMatrix::eye();  // camera is at the platform's center
+	MVS_API::CMatrix C = MVS_API::CMatrix(0,0,0);
+	Platform::Camera camera(K, R, C);
+	
+	Platform platform_1;
+	platform_1.name = String("front_platform");
+	platform_1.cameras.emplace_back(camera);
+	scene.platforms.emplace_back(platform_1);
+
+	Platform platform_2;
+	platform_2.name = String("back_platform");
+	platform_2.cameras.emplace_back(camera);
+	scene.platforms.emplace_back(platform_2);
+
+
+	// 3. load image
+	// 	  first for front images and then for back images
+	int global_image_id = 0;
+	std::vector<String> image_lists;
+	image_lists.push_back(front_image_list_path);
+	image_lists.push_back(back_image_list_path);
+
+	for (int i = 0; i < image_lists.size(); ++i) {
+		std::ifstream file;
+		file.open(image_lists[i].c_str(), std::ios::in);
+		if (!file.good()) {
+			VERBOSE("error: unable to open views file '%s'", image_lists[i].c_str());
+			exit(0);
+		}
+
+		std::string line;
+		while (getline(file, line)) {
+			Eigen::Quaterniond qwc;
+			Eigen::Vector3d twc;
+			std::string image_name;
+			
+			std::stringstream ss(line);
+			ss >> image_name
+			   >> qwc.x() >> qwc.y() >> qwc.z() >> qwc.w()
+			   >> twc(0) >> twc(1) >> twc(2);
+			
+			MVS_API::Platform::Pose pose;
+			Eigen::Map<EMat33d>(pose.R.val) = qwc.toRotationMatrix();  // platform's pose is Rwc and twc ??
+			Eigen::Map<EVec3d>(&pose.C.x) = -(qwc.toRotationMatrix().transpose() * twc);
+
+			MVS_API::Image image;
+			image.name = image_name;
+			image.platformID = i;
+			image.cameraID = 0;
+			image.ID = global_image_id++;
+			image.width = WIDTH;
+			image.height = HEIGHT;
+			MVS_API::Platform& platform = scene.platforms[i];
+			image.poseID = platform.poses.size();
+			platform.poses.emplace_back(pose);
+			scene.images.emplace_back(image);
+		}
 	}
 
-	{
-	// decimate to the desired resolution
-	if (OPT::fDecimateMesh < 1.f) {
-		ASSERT(OPT::fDecimateMesh > 0.f);
-		scene.mesh.Clean(OPT::fDecimateMesh, 0.f, false, OPT::nCloseHoles, 0u, 0.f, false);
-		scene.mesh.Clean(1.f, 0.f, false, 0u, 0u, 0.f, true); // extra cleaning to remove non-manifold problems created by closing holes
-		#if TD_VERBOSE != TD_VERBOSE_OFF
-		if (VERBOSITY_LEVEL > 3)
-			scene.mesh.Save(baseFileName +_T("_decim")+OPT::strExportType);
-		#endif
-	}
-	// fetch list of views to be used for texturing
+	// 4. fetch list of views to be used for texturing
 	IIndexArr views;
-	if (!OPT::strViewsFileName.empty())
-		views = ParseViewsFile(MAKE_PATH_SAFE(OPT::strViewsFileName), scene);
+	for (int i = 0; i < global_image_id; ++i)
+		views.emplace_back(i);
+	// IIndexArr views;
+	// if (!OPT::strViewsFileName.empty())
+	// 	views = ParseViewsFile(MAKE_PATH_SAFE(OPT::strViewsFileName), scene);
 
-	// compute mesh texture
+	// 5. compute mesh texture
 	TD_TIMER_START();
 	if (!scene.TextureMesh(OPT::nResolutionLevel, OPT::nMinResolution, OPT::minCommonCameras, OPT::fOutlierThreshold, OPT::fRatioDataSmoothness,
 						   OPT::bGlobalSeamLeveling, OPT::bLocalSeamLeveling, OPT::nTextureSizeMultiple, OPT::nRectPackingHeuristic, Pixel8U(OPT::nColEmpty),
@@ -312,7 +403,7 @@ int main(int argc, LPCTSTR* argv)
 		return EXIT_FAILURE;
 	VERBOSE("Mesh texturing completed: %u vertices, %u faces (%s)", scene.mesh.vertices.GetSize(), scene.mesh.faces.GetSize(), TD_TIMER_GET_FMT().c_str());
 
-	// save the final mesh
+	// 6. save the final mesh
 	scene.mesh.Save(baseFileName+OPT::strExportType);
 	#if TD_VERBOSE != TD_VERBOSE_OFF
 	if (VERBOSITY_LEVEL > 2)
@@ -322,21 +413,21 @@ int main(int argc, LPCTSTR* argv)
 		scene.Save(baseFileName+_T(".mvs"), (ARCHIVE_TYPE)OPT::nArchiveType);
 	}
 
-	if (OPT::nOrthoMapResolution) {
-		// project mesh as an orthographic image
-		ProjectOrtho:
-		Image8U3 imageRGB;
-		Image8U imageRGBA[4];
-		Point3 center;
-		scene.mesh.ProjectOrthoTopDown(OPT::nOrthoMapResolution, imageRGB, imageRGBA[3], center);
-		Image8U4 image;
-		cv::split(imageRGB, imageRGBA);
-		cv::merge(imageRGBA, 4, image);
-		image.Save(baseFileName+_T("_orthomap.png"));
-		SML sml(_T("OrthoMap"));
-		sml[_T("Center")].val = String::FormatString(_T("%g %g %g"), center.x, center.y, center.z);
-		sml.Save(baseFileName+_T("_orthomap.txt"));
-	}
+	// if (OPT::nOrthoMapResolution) {
+	// 	// project mesh as an orthographic image
+	// 	ProjectOrtho:
+	// 	Image8U3 imageRGB;
+	// 	Image8U imageRGBA[4];
+	// 	Point3 center;
+	// 	scene.mesh.ProjectOrthoTopDown(OPT::nOrthoMapResolution, imageRGB, imageRGBA[3], center);
+	// 	Image8U4 image;
+	// 	cv::split(imageRGB, imageRGBA);
+	// 	cv::merge(imageRGBA, 4, image);
+	// 	image.Save(baseFileName+_T("_orthomap.png"));
+	// 	SML sml(_T("OrthoMap"));
+	// 	sml[_T("Center")].val = String::FormatString(_T("%g %g %g"), center.x, center.y, center.z);
+	// 	sml.Save(baseFileName+_T("_orthomap.txt"));
+	// }
 
 	return EXIT_SUCCESS;
 }
