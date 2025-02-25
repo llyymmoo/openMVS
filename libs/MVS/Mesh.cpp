@@ -1320,11 +1320,13 @@ bool Mesh::LoadOBJ(const String& fileName)
 	// open and parse OBJ file
 	ObjModel model;
 	if (!model.Load(fileName)) {
+		printf("error: invalid OBJ file\n");
 		DEBUG_EXTRA("error: invalid OBJ file");
 		return false;
 	}
 
 	if (model.get_vertices().empty() || model.get_groups().empty()) {
+		printf("error: invalid mesh file\n");
 		DEBUG_EXTRA("error: invalid mesh file");
 		return false;
 	}

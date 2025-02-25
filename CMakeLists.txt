@@ -87,7 +87,7 @@ IF(CMAKE_CONFIGURATION_TYPES)
 	MESSAGE(STATUS "Multi-configuration generator: ${CMAKE_GENERATOR}")
 ELSE()
 	IF(NOT CMAKE_BUILD_TYPE)
-		SET(CMAKE_BUILD_TYPE "Release" CACHE STRING
+		SET(CMAKE_BUILD_TYPE "Debug" CACHE STRING
 			"Choose the type of build, options are: None(debug information only), Debug, Release, RelWithDebInfo, MinSizeRel."
 			FORCE) # FORCE to override user settings from command line if they are empty
 	ENDIF()

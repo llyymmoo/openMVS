@@ -301,33 +301,35 @@ int main(int argc, LPCTSTR* argv)
 	// }
 
 // parameters define
-#define FX          100
-#define FY          100
-#define CX          100
-#define CY          100
-#define HEIGHT      640
-#define WIDTH       360
+#define FX          305.85
+#define FY          304.87
+#define CX          572.00
+#define CY          578.97
+#define HEIGHT      1152
+#define WIDTH       1152
 
 
 	// path define
-	String mesh_obj_file_path = "/home/lym/Data";
-	String front_image_list_path = "";
-	String back_image_list_path = "";
-	String work_folder_path = "";
-	String save_folder_path = "";
+	String mesh_obj_file_path = "/home/lym/res/6F_recon/mvs/reconstructed_mesh.ply";
+	String front_image_list_path = "/home/lym/res/6F_recon/metadata/front_pose.txt";
+	String back_image_list_path = "/home/lym/res/6F_recon/metadata/back_pose.txt";
+	String save_file_path = "/home/lym/res/6F_recon/mvs/out.obj";
 
-	Scene scene(OPT::nMaxThreads);
+	Scene scene(0);
 
 	// 1. load mesh
-	scene.mesh.Load(mesh_obj_file_path);
+	if (!scene.mesh.Load(mesh_obj_file_path)) {
+		printf("load mesh failed !\n");
+		exit(0);
+	}
 
 	// 2. load platform and camera
 	//    (for insta360 camera, we have 2 platforms and cameras: one for front and one for back)
 	MVS_API::KMatrix K = MVS_API::KMatrix::eye();
-	K(0,0) = FX;
-	K(1,1) = FY;
-	K(0,2) = CX-REAL(0.5);
-	K(1,2) = CY-REAL(0.5);
+	K(0,0) = FX / double(HEIGHT);
+	K(1,1) = FY / double(HEIGHT);
+	K(0,2) = CX / double(HEIGHT) - REAL(0.5);
+	K(1,2) = CY / double(HEIGHT) - REAL(0.5);
 	MVS_API::RMatrix R = MVS_API::RMatrix::eye();  // camera is at the platform's center
 	MVS_API::CMatrix C = MVS_API::CMatrix(0,0,0);
 	Platform::Camera camera(K, R, C);
@@ -369,12 +371,15 @@ int main(int argc, LPCTSTR* argv)
 			   >> qwc.x() >> qwc.y() >> qwc.z() >> qwc.w()
 			   >> twc(0) >> twc(1) >> twc(2);
 			
+			// P is a point in world frame, then K*R(P-C) rotate point to camera frame
+			// so R is rotation from world to camera
+			//    C is translation from camera to world
 			MVS_API::Platform::Pose pose;
-			Eigen::Map<EMat33d>(pose.R.val) = qwc.toRotationMatrix();  // platform's pose is Rwc and twc ??
-			Eigen::Map<EVec3d>(&pose.C.x) = -(qwc.toRotationMatrix().transpose() * twc);
+			pose.R = qwc.toRotationMatrix().transpose();
+			pose.C = twc;
 
 			MVS_API::Image image;
-			image.name = image_name;
+			image.name = ((i == 0) ? "/home/lym/res/6F_recon/front/" : "/home/lym/res/6F_recon/back/") + image_name + ".png";
 			image.platformID = i;
 			image.cameraID = 0;
 			image.ID = global_image_id++;
@@ -389,7 +394,7 @@ int main(int argc, LPCTSTR* argv)
 
 	// 4. fetch list of views to be used for texturing
 	IIndexArr views;
-	for (int i = 0; i < global_image_id; ++i)
+	for (int i = 0; i < 100; ++i)
 		views.emplace_back(i);
 	// IIndexArr views;
 	// if (!OPT::strViewsFileName.empty())
@@ -397,21 +402,24 @@ int main(int argc, LPCTSTR* argv)
 
 	// 5. compute mesh texture
 	TD_TIMER_START();
-	if (!scene.TextureMesh(OPT::nResolutionLevel, OPT::nMinResolution, OPT::minCommonCameras, OPT::fOutlierThreshold, OPT::fRatioDataSmoothness,
-						   OPT::bGlobalSeamLeveling, OPT::bLocalSeamLeveling, OPT::nTextureSizeMultiple, OPT::nRectPackingHeuristic, Pixel8U(OPT::nColEmpty),
-						   OPT::fSharpnessWeight, OPT::nIgnoreMaskLabel, OPT::nMaxTextureSize, views))
+	// if (!scene.TextureMesh(OPT::nResolutionLevel, OPT::nMinResolution, OPT::minCommonCameras, OPT::fOutlierThreshold, OPT::fRatioDataSmoothness,
+	// 					   OPT::bGlobalSeamLeveling, OPT::bLocalSeamLeveling, OPT::nTextureSizeMultiple, OPT::nRectPackingHeuristic, Pixel8U(OPT::nColEmpty),
+	// 					   OPT::fSharpnessWeight, OPT::nIgnoreMaskLabel, OPT::nMaxTextureSize, views))
+	if (!scene.TextureMesh(0, 640, 0, 6e-2f, 0.1f,
+						   true, true, 0, 3, Pixel8U(0x00FF7F27),
+						   0.5f, -1, 8192, views))
 		return EXIT_FAILURE;
 	VERBOSE("Mesh texturing completed: %u vertices, %u faces (%s)", scene.mesh.vertices.GetSize(), scene.mesh.faces.GetSize(), TD_TIMER_GET_FMT().c_str());
 
 	// 6. save the final mesh
-	scene.mesh.Save(baseFileName+OPT::strExportType);
-	#if TD_VERBOSE != TD_VERBOSE_OFF
-	if (VERBOSITY_LEVEL > 2)
-		scene.ExportCamerasMLP(baseFileName+_T(".mlp"), baseFileName+OPT::strExportType);
-	#endif
-	if ((ARCHIVE_TYPE)OPT::nArchiveType != ARCHIVE_MVS || sceneType != Scene::SCENE_INTERFACE)
-		scene.Save(baseFileName+_T(".mvs"), (ARCHIVE_TYPE)OPT::nArchiveType);
-	}
+	scene.mesh.Save(save_file_path);
+	// #if TD_VERBOSE != TD_VERBOSE_OFF
+	// if (VERBOSITY_LEVEL > 2)
+	// 	scene.ExportCamerasMLP(baseFileName+_T(".mlp"), baseFileName+OPT::strExportType);
+	// #endif
+	// if ((ARCHIVE_TYPE)OPT::nArchiveType != ARCHIVE_MVS || sceneType != Scene::SCENE_INTERFACE)
+	// 	scene.Save(baseFileName+_T(".mvs"), (ARCHIVE_TYPE)OPT::nArchiveType);
+	// }
 
 	// if (OPT::nOrthoMapResolution) {
 	// 	// project mesh as an orthographic image
