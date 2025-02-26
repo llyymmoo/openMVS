@@ -310,12 +310,12 @@ int main(int argc, LPCTSTR* argv)
 
 
 	// path define
-	String mesh_obj_file_path = "/home/lym/res/6F_recon/mvs/reconstructed_mesh.ply";
+	String mesh_obj_file_path = "/home/lym/res/6F_recon/mvs/refined.ply";
 	String front_image_list_path = "/home/lym/res/6F_recon/metadata/front_pose.txt";
 	String back_image_list_path = "/home/lym/res/6F_recon/metadata/back_pose.txt";
 	String save_file_path = "/home/lym/res/6F_recon/mvs/out.obj";
 
-	Scene scene(0);
+	Scene scene(1);
 
 	// 1. load mesh
 	if (!scene.mesh.Load(mesh_obj_file_path)) {
@@ -368,8 +368,8 @@ int main(int argc, LPCTSTR* argv)
 			
 			std::stringstream ss(line);
 			ss >> image_name
-			   >> qwc.x() >> qwc.y() >> qwc.z() >> qwc.w()
-			   >> twc(0) >> twc(1) >> twc(2);
+			   >> twc.x() >> twc.y() >> twc.z()
+			   >> qwc.x() >> qwc.y() >> qwc.z() >> qwc.w();
 			
 			// P is a point in world frame, then K*R(P-C) rotate point to camera frame
 			// so R is rotation from world to camera
@@ -390,12 +390,16 @@ int main(int argc, LPCTSTR* argv)
 			platform.poses.emplace_back(pose);
 			scene.images.emplace_back(image);
 		}
+
+		file.close();
 	}
 
 	// 4. fetch list of views to be used for texturing
 	IIndexArr views;
-	for (int i = 0; i < 100; ++i)
-		views.emplace_back(i);
+	for (int i = 0; i < global_image_id; ++i) {
+		if ((i%120) == 0) // if pose is not so accurate, quality is better with less images
+			views.emplace_back(i);
+	}
 	// IIndexArr views;
 	// if (!OPT::strViewsFileName.empty())
 	// 	views = ParseViewsFile(MAKE_PATH_SAFE(OPT::strViewsFileName), scene);
@@ -405,9 +409,9 @@ int main(int argc, LPCTSTR* argv)
 	// if (!scene.TextureMesh(OPT::nResolutionLevel, OPT::nMinResolution, OPT::minCommonCameras, OPT::fOutlierThreshold, OPT::fRatioDataSmoothness,
 	// 					   OPT::bGlobalSeamLeveling, OPT::bLocalSeamLeveling, OPT::nTextureSizeMultiple, OPT::nRectPackingHeuristic, Pixel8U(OPT::nColEmpty),
 	// 					   OPT::fSharpnessWeight, OPT::nIgnoreMaskLabel, OPT::nMaxTextureSize, views))
-	if (!scene.TextureMesh(0, 640, 0, 6e-2f, 0.1f,
-						   true, true, 0, 3, Pixel8U(0x00FF7F27),
-						   0.5f, -1, 8192, views))
+	if (!scene.TextureMesh(0, 640, 0, 6e-2f, 1.0f,
+						   true, true, 3, 3, Pixel8U(0x00FF7F27),
+						   0.9f, -1, 8192, views))
 		return EXIT_FAILURE;
 	VERBOSE("Mesh texturing completed: %u vertices, %u faces (%s)", scene.mesh.vertices.GetSize(), scene.mesh.faces.GetSize(), TD_TIMER_GET_FMT().c_str());
 
